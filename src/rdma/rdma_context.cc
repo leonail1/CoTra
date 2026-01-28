@@ -1,5 +1,8 @@
 #include "rdma/rdma_context.h"
 
+#include <errno.h>
+#include <string.h>
+
 #include "anns/vec_buffer.h"
 #include "coromem/include/backend.h"
 
@@ -141,20 +144,29 @@ int RdmaContext::alloc_ctx(RdmaParameter *param) {
 
 void RdmaContext::create_main_partition_mr(
     char *vec_part_ptr, size_t part_length, size_t cacheline) {
+  fprintf(stderr, "[DEBUG] create_main_partition_mr: ptr=%p, len=%zu, cacheline=%zu\n",
+          vec_part_ptr, part_length, cacheline);
+  
   int flags = IBV_ACCESS_LOCAL_WRITE;
   flags |= IBV_ACCESS_REMOTE_WRITE;
   flags |= IBV_ACCESS_REMOTE_READ;
   for_read_ptr[0] = vec_part_ptr;
-  for_read_mr[0] =
-      ibv_reg_mr(pd, for_read_ptr[0], INC(part_length, cacheline), flags);
+  
+  size_t aligned_len = INC(part_length, cacheline);
+  fprintf(stderr, "[DEBUG] ibv_reg_mr 参数: pd=%p, addr=%p, len=%zu, flags=0x%x\n",
+          pd, for_read_ptr[0], aligned_len, flags);
+  
+  for_read_mr[0] = ibv_reg_mr(pd, for_read_ptr[0], aligned_len, flags);
+  
   if (!for_read_mr[0]) {
-    printf(
-        "Failed to create main mr. length: %llu align length: %llu\n",
-        part_length, INC(part_length, cacheline));
+    fprintf(stderr,
+        "[ERROR] Failed to create main mr. length: %llu align length: %llu, errno=%d (%s)\n",
+        (unsigned long long)part_length, (unsigned long long)aligned_len, 
+        errno, strerror(errno));
   } else {
-    printf(
-        "Create main mr success. length: %llu align length: %llu\n",
-        part_length, INC(part_length, cacheline));
+    fprintf(stderr,
+        "[DEBUG] Create main mr success. length: %llu align length: %llu, mr=%p\n",
+        (unsigned long long)part_length, (unsigned long long)aligned_len, for_read_mr[0]);
   }
 }
 
@@ -269,28 +281,37 @@ int RdmaContext::create_ctx_mr(
 int RdmaContext::create_cqs(RdmaContext *main_ctx, RdmaParameter *param) {
   // send_cq store all the finished send requests, max number can
   // achieve <max send num> * <machine num> + <max async read op num>
+  fprintf(stderr, "[DEBUG] create_cqs: 创建 send_cq, 大小=%d\n", 
+          (MAX_WRITE_NUM + MAX_READ_NUM) * MACHINE_NUM);
   send_cq = ibv_create_cq(
       context, (MAX_WRITE_NUM + MAX_READ_NUM) * MACHINE_NUM, NULL, send_channel,
       0);
   if (!send_cq) {
-    fprintf(stderr, "Couldn't create CQ\n");
+    fprintf(stderr, "[ERROR] Couldn't create send CQ, errno=%d (%s)\n", errno, strerror(errno));
     return FAILURE;
   }
+  fprintf(stderr, "[DEBUG] send_cq 创建成功\n");
 
   // recv_cq store all the finished recv requests, max number can
   // achieve <max send num> * <machine num>
+  fprintf(stderr, "[DEBUG] create_cqs: 创建 recv_cq, 大小=%d\n", 
+          MAX_WRITE_NUM * MACHINE_NUM);
   recv_cq = ibv_create_cq(
       context, MAX_WRITE_NUM * MACHINE_NUM, NULL, recv_channel, 0);
   if (!recv_cq) {
-    fprintf(stderr, "Couldn't create a receiver CQ\n");
+    fprintf(stderr, "[ERROR] Couldn't create recv CQ, errno=%d (%s)\n", errno, strerror(errno));
     return FAILURE;
   }
+  fprintf(stderr, "[DEBUG] recv_cq 创建成功\n");
   return SUCCESS;
 }
 
 struct ibv_qp *RdmaContext::qp_create(
     RdmaContext *main_ctx, RdmaParameter *param, int qp_index) {
   struct ibv_qp *qp = NULL;
+
+  fprintf(stderr, "[DEBUG] qp_create[%d]: 开始, send_cq=%p, recv_cq=%p, pd=%p\n",
+          qp_index, send_cq, recv_cq, pd);
 
   int is_dc_server_side = 0;
   struct ibv_qp_init_attr attr;
@@ -301,7 +322,12 @@ struct ibv_qp *RdmaContext::qp_create(
   // attr.recv_cq = send_cq;
   attr.recv_cq = recv_cq;
 
+#ifdef USE_ERDMA
+  // eRDMA 不支持或只支持很小的 inline data，设置为 0
+  attr.cap.max_inline_data = 0;
+#else
   attr.cap.max_inline_data = param->inline_size;
+#endif
 
   // The max work request number can be in SQ.
   // Rmember that read req and send req are mixed together.
@@ -317,16 +343,38 @@ struct ibv_qp *RdmaContext::qp_create(
 
   attr.qp_type = IBV_QPT_RC;
 
-  qp = ibv_create_qp(pd, &attr);
+  fprintf(stderr, "[DEBUG] qp_create[%d]: ibv_create_qp 参数 - max_send_wr=%d, max_recv_wr=%d, max_send_sge=%d, max_recv_sge=%d, max_inline_data=%d\n",
+          qp_index, attr.cap.max_send_wr, attr.cap.max_recv_wr, attr.cap.max_send_sge, attr.cap.max_recv_sge, attr.cap.max_inline_data);
 
-  if (qp == NULL && errno == ENOMEM) {
-    fprintf(
-        stderr,
-        "Requested QP size might be too big. Try reducing TX depth "
-        "and/or inline size.\n");
+  // 查询设备能力进行对比
+  struct ibv_device_attr dev_attr;
+  if (ibv_query_device(context, &dev_attr) == 0) {
+    fprintf(stderr, "[DEBUG] qp_create[%d]: 设备能力 - max_qp=%d, max_qp_wr=%d, max_sge=%d, max_cq=%d\n",
+            qp_index, dev_attr.max_qp, dev_attr.max_qp_wr, dev_attr.max_sge, dev_attr.max_cq);
+    fprintf(stderr, "[DEBUG] qp_create[%d]: 设备能力 - max_qp_rd_atom=%d, max_qp_init_rd_atom=%d\n",
+            qp_index, dev_attr.max_qp_rd_atom, dev_attr.max_qp_init_rd_atom);
   }
 
-  if (param->inline_size > qp_cap->max_inline_data) {
+  qp = ibv_create_qp(pd, &attr);
+
+  if (qp == NULL) {
+    fprintf(stderr, "[ERROR] qp_create[%d]: ibv_create_qp 失败, errno=%d (%s)\n",
+            qp_index, errno, strerror(errno));
+    fprintf(stderr, "[DEBUG] qp_create[%d]: 请检查以下可能原因:\n", qp_index);
+    fprintf(stderr, "         1. send_cq 或 recv_cq 是否有效 (send_cq=%p, recv_cq=%p)\n", send_cq, recv_cq);
+    fprintf(stderr, "         2. pd 是否有效 (pd=%p)\n", pd);
+    fprintf(stderr, "         3. 参数是否超出设备限制\n");
+    if (errno == ENOMEM) {
+      fprintf(
+          stderr,
+          "Requested QP size might be too big. Try reducing TX depth "
+          "and/or inline size.\n");
+    }
+  } else {
+    fprintf(stderr, "[DEBUG] qp_create[%d]: ibv_create_qp 成功, qp=%p\n", qp_index, qp);
+  }
+
+  if (qp && param->inline_size > qp_cap->max_inline_data) {
     printf(
         "  Actual inline-size(%d) < requested inline-size(%d)\n",
         qp_cap->max_inline_data, param->inline_size);
@@ -373,49 +421,58 @@ int RdmaContext::ctx_init(
     // char recv_ptr[][MAX_RECV_NUM][MAX_QUERYBUFFER_SIZE], size_t recv_len
 ) {
   // pd = main_pd;
+  auto &tp = getThreadPool();
+  fprintf(stderr, "[DEBUG] ctx_init 开始, 线程=%d, for_read_mr[0]=%p, pd=%p\n", 
+          tp.getTID(), for_read_mr[0], pd);
 
   auto send_write_ptr = local_send_write->buffer;
   auto send_write_length = local_send_write->buffer_len;
   auto recv_write_ptr = local_recv_write->buffer;
   auto recv_write_length = local_recv_write->buffer_len;
 
-  auto &tp = getThreadPool();
   if (!pd) {
-    printf("thread %d pd wrong.\n", tp.getTID());
+    fprintf(stderr, "[ERROR] 线程 %d: pd 为空!\n", tp.getTID());
   }
 
+  fprintf(stderr, "[DEBUG] 线程 %d: 调用 create_ctx_mr...\n", tp.getTID());
   if (create_ctx_mr(
           param, main_ctx, buf_ptr, buf_len, local_send_write, local_recv_write
           // local_send_write->buffer,local_send_write->buffer_len,
           // local_recv_write->buffer,local_recv_write->buffer_len
           // , send_ptr, send_length, recv_ptr,recv_len
           )) {
-    fprintf(stderr, "Failed to create MR\n");
+    fprintf(stderr, "[ERROR] 线程 %d: Failed to create MR\n", tp.getTID());
     ibv_dealloc_pd(pd);
     abort();
   }
+  fprintf(stderr, "[DEBUG] 线程 %d: create_ctx_mr 成功\n", tp.getTID());
 
+  fprintf(stderr, "[DEBUG] 线程 %d: 调用 create_cqs...\n", tp.getTID());
   if (create_cqs(main_ctx, param)) {
-    fprintf(stderr, "Failed to create CQs\n");
+    fprintf(stderr, "[ERROR] 线程 %d: Failed to create CQs\n", tp.getTID());
   }
+  fprintf(stderr, "[DEBUG] 线程 %d: create_cqs 完成\n", tp.getTID());
 
+  fprintf(stderr, "[DEBUG] 线程 %d: 创建 QP, machine_num=%d...\n", tp.getTID(), param->machine_num);
   int qp_index = 0;
   for (int i = 0; i < param->machine_num; i++) {
+    fprintf(stderr, "[DEBUG] 线程 %d: 创建 QP[%d]...\n", tp.getTID(), i);
     qp[i] = qp_create(main_ctx, param, i);
-    auto &tp = getThreadPool();
     if (qp[i] == NULL) {
-      // fprintf(stderr, "thread %d unable to create QP.\n");
-      printf("thread %d create qp failed\n", tp.getTID());
+      fprintf(stderr, "[ERROR] 线程 %d: 创建 QP[%d] 失败\n", tp.getTID(), i);
       for (int j = 0; j < qp_index; j++) {
         ibv_destroy_qp(qp[j]);
       }
       abort();
     } else {
-      // printf("thread %d create qp success\n", tp.getTID());
+      fprintf(stderr, "[DEBUG] 线程 %d: QP[%d] 创建成功\n", tp.getTID(), i);
     }
+    fprintf(stderr, "[DEBUG] 线程 %d: modify_qp_to_init QP[%d]...\n", tp.getTID(), i);
     modify_qp_to_init(param, i);
+    fprintf(stderr, "[DEBUG] 线程 %d: QP[%d] 已初始化\n", tp.getTID(), i);
     qp_index++;
   }
+  fprintf(stderr, "[DEBUG] 线程 %d: ctx_init 完成\n", tp.getTID());
 
   return SUCCESS;
 }
@@ -429,9 +486,20 @@ int RdmaContext::modify_qp_to_rtr(
   attr->ah_attr.src_path_bits = 0;
   attr->ah_attr.port_num = param->ib_port;
 
+#ifdef USE_ERDMA
+  // eRDMA 使用以太网/RoCE，必须使用 GID (is_global=1)
+  attr->ah_attr.is_global = 1;
+  attr->ah_attr.grh.dgid = dest->gid;
+  attr->ah_attr.grh.sgid_index = my_dest->gid_index;
+  attr->ah_attr.grh.hop_limit = 64;
+  attr->ah_attr.grh.traffic_class = 0;
+  attr->ah_attr.grh.flow_label = 0;
+  attr->ah_attr.sl = 0;  // eRDMA 使用默认 SL
+#else
   attr->ah_attr.dlid = dest->lid;
   attr->ah_attr.sl = param->sl;
   attr->ah_attr.is_global = 0;
+#endif
 
   attr->path_mtu = param->curr_mtu;
   attr->dest_qp_num = dest->qpn;
@@ -444,7 +512,15 @@ int RdmaContext::modify_qp_to_rtr(
 
   flags |= (IBV_QP_MIN_RNR_TIMER | IBV_QP_MAX_DEST_RD_ATOMIC);
 
-  return ibv_modify_qp(qp, attr, flags);
+  int ret = ibv_modify_qp(qp, attr, flags);
+  if (ret) {
+    fprintf(stderr, "[ERROR] modify_qp_to_rtr 失败, ret=%d, errno=%d (%s)\n", ret, errno, strerror(errno));
+#ifdef USE_ERDMA
+    fprintf(stderr, "[DEBUG] GID index=%d, dest_qpn=%d, rq_psn=%d\n", 
+            my_dest->gid_index, dest->qpn, dest->psn);
+#endif
+  }
+  return ret;
 }
 
 int RdmaContext::modify_qp_to_rts(

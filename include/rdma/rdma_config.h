@@ -1,31 +1,51 @@
 #pragma once
 
-/* config.h.  Generated from config.h.in by configure.  */
-/* config.h.in.  Generated from configure.ac by autoheader.  */
+/* ============================================
+ * RDMA Configuration for CoTra
+ * ============================================
+ * 
+ * 支持两种RDMA模式：
+ *   1. 标准Mellanox RDMA (默认)
+ *   2. 阿里云eRDMA (通过CMake -DUSE_ERDMA=ON启用)
+ * 
+ * CMake构建示例：
+ *   标准RDMA:  cmake -DMACHINE_NUM=16 ..
+ *   eRDMA:     cmake -DUSE_ERDMA=ON -DMACHINE_NUM=2 ..
+ */
 
-/* Enable CUDA feature */
-/* #undef CUDA_PATH */
+/* ============================================
+ * 集群配置 (通过CMake设置)
+ * ============================================ */
+#ifdef MACHINE_NUM_CMAKE
+  #define MACHINE_NUM (MACHINE_NUM_CMAKE)
+#else
+  #define MACHINE_NUM (2)  // 默认2节点
+#endif
 
-// #define MACHINE_NUM (4)
-// #define MACHINE_NUM (8)
-#define MACHINE_NUM (16)
 #define MAX_THREAD_NUM (16)
 #define GROUP_SIZE (16)
-// NOTE: MAX_READ_NUM is the max read num one thread cand send to one machine
+// NOTE: MAX_READ_NUM 是单线程向单机器发送的最大读取数
 #define MAX_READ_NUM (2 * GROUP_SIZE)
 #define MAX_VEC_LEN (2560)
-// #define MAX_QUERYBUFFER_SIZE (32768)
-// #define MAX_QUERYBUFFER_SIZE (8192)
 #define MAX_QUERYBUFFER_SIZE (24576)
-// #define MAX_QUERYBUFFER_SIZE (2000)
 #define MAX_SEND_SGE (1)
 #define MAX_RECV_SGE (1)
 #define MAX_SGE_NUM (16)
-// WARN: this may not enough on large datasets.
+// WARN: 大数据集可能需要增大此值
 #define MAX_CACHE_VEC (2000)
-// #define MAX_RECV_NUM (512)  // for task push
-#define MAX_WRITE_NUM (512)
-#define MAX_RECV_NUM (64)
+
+#ifdef USE_ERDMA
+  // eRDMA 兼容模式下的较小参数
+  // 注意: max_send_wr = (MAX_WRITE_NUM + MAX_READ_NUM) * MACHINE_NUM
+  //       max_recv_wr = MAX_WRITE_NUM * MACHINE_NUM
+  // eRDMA QP 限制较严格 (通常 <= 128)
+  #define MAX_WRITE_NUM (2)
+  #define MAX_RECV_NUM (1)
+#else
+  // 标准 Mellanox RDMA 参数
+  #define MAX_WRITE_NUM (512)
+  #define MAX_RECV_NUM (64)
+#endif
 #define RELEASE_BLOCK (MAX_WRITE_NUM >> 2)
 #define READ_MARK_OFF (25)
 #define MAX_WC_NUM (64)
@@ -51,17 +71,54 @@
 #define SUCCESS (0)
 #define FAILURE (1)
 
-/* Have AES XTS support */
-#define HAVE_AES_XTS 1
+/* ============================================
+ * eRDMA兼容性配置
+ * 
+ * 以下Mellanox特有功能在eRDMA上不可用：
+ *   - HAVE_AES_XTS:   AES加密 (依赖mlx5dv)
+ *   - HAVE_MLX5DV:    Mellanox Direct Verbs
+ *   - HAVE_MLX5_DEVX: MLX5 DEVX支持
+ *   - HAVE_EX_ODP:    Extended ODP
+ *   - HAVE_PACKET_PACING, HAVE_RAW_ETH 等高级功能
+ * ============================================ */
 
-/* Enable CUDA feature */
-/* #undef HAVE_CUDA */
+#ifdef USE_ERDMA
+  /* eRDMA模式：禁用Mellanox特有功能 */
+  /* #undef HAVE_AES_XTS */
+  /* #undef HAVE_MLX5DV */
+  /* #undef HAVE_MLX5_DEVX */
+  /* #undef HAVE_DCS */
+  /* #undef HAVE_EX_ODP */
+  /* #undef HAVE_PACKET_PACING */
+  /* #undef HAVE_RAW_ETH */
+  /* #undef HAVE_RAW_ETH_REG */
+  /* #undef HAVE_REG_DMABUF_MR */
+  /* #undef HAVE_RO */
+  /* #undef HAVE_SNIFFER */
+  /* #undef HAVE_IPV4_EXT */
+  /* #undef HAVE_IPV6 */
+  /* #undef HAVE_XRCD */
+#else
+  /* 标准Mellanox RDMA模式 */
+  #define HAVE_AES_XTS 1
+  #define HAVE_MLX5DV 1
+  #define HAVE_MLX5_DEVX 1
+  #define HAVE_DCS 1
+  #define HAVE_EX_ODP 1
+  #define HAVE_PACKET_PACING 1
+  #define HAVE_RAW_ETH 1
+  #define HAVE_RAW_ETH_REG 1
+  #define HAVE_REG_DMABUF_MR 1
+  #define HAVE_RO 1
+  #define HAVE_SNIFFER 1
+  #define HAVE_IPV4_EXT 1
+  #define HAVE_IPV6 1
+  #define HAVE_XRCD 1
+#endif
 
-/* Enable CUDA DMABUF feature */
-/* #undef HAVE_CUDA_DMABUF */
-
-/* Have DCS support */
-#define HAVE_DCS 1
+/* ============================================
+ * 通用RDMA功能 (eRDMA和Mellanox都支持)
+ * ============================================ */
 
 /* Define to 1 if you have the <dlfcn.h> header file. */
 #define HAVE_DLFCN_H 1
@@ -72,26 +129,11 @@
 /* Have EX support */
 #define HAVE_EX 1
 
-/* Have Extended ODP support */
-#define HAVE_EX_ODP 1
-
 /* Have a way to check gid type */
 #define HAVE_GID_TYPE 1
 
 /* API GID compatibility */
 #define HAVE_GID_TYPE_DECLARED 1
-
-/* Define to 1 if you have the <hip/hip_runtime_api.h> header file. */
-/* #undef HAVE_HIP_HIP_RUNTIME_API_H */
-
-/* Define to 1 if you have the <hip/hip_version.h> header file. */
-/* #undef HAVE_HIP_HIP_VERSION_H */
-
-/* Enable Habana Labs benchmarks */
-/* #undef HAVE_HL */
-
-/* Define to 1 if you have the <hlthunk.h> header file. */
-/* #undef HAVE_HLTHUNK_H */
 
 /* Have new post send API support */
 #define HAVE_IBV_WR_API 1
@@ -102,12 +144,6 @@
 /* Define to 1 if you have the <inttypes.h> header file. */
 #define HAVE_INTTYPES_H 1
 
-/* Enable IPv4 Extended Flow Specification */
-#define HAVE_IPV4_EXT 1
-
-/* Enable IPv6 Flow Specification */
-#define HAVE_IPV6 1
-
 /* Define to 1 if you have the `ibverbs' library (-libverbs). */
 #define HAVE_LIBIBVERBS 1
 
@@ -117,62 +153,8 @@
 /* Define to 1 if you have the <memory.h> header file. */
 #define HAVE_MEMORY_H 1
 
-/* Define to 1 if you have the <misc/habanalabs.h> header file. */
-/* #undef HAVE_MISC_HABANALABS_H */
-
-/* Have Direct Verbs support */
-#define HAVE_MLX5DV 1
-
-/* Have MLX5 DEVX support */
-#define HAVE_MLX5_DEVX 1
-
-/* Enable Neuron benchmarks */
-/* #undef HAVE_NEURON */
-
-/* Enable Neuron DMA buffers */
-/* #undef HAVE_NEURON_DMABUF */
-
-/* Define to 1 if you have the <nrt/nrt.h> header file. */
-/* #undef HAVE_NRT_NRT_H */
-
-/* Have Out of order data placement support */
-/* #undef HAVE_OOO_ATTR */
-
-/* Have PACKET_PACING support */
-#define HAVE_PACKET_PACING 1
-
 /* Define to 1 if you have the <pci/pci.h> header file. */
 #define HAVE_PCI_PCI_H 1
-
-/* Enable RAW_ETH_TEST */
-#define HAVE_RAW_ETH 1
-
-/* Enable RAW_ETH_TEST_REG */
-#define HAVE_RAW_ETH_REG 1
-
-/* Enable HAVE_REG_DMABUF_MR */
-#define HAVE_REG_DMABUF_MR 1
-
-/* Enable Relaxed Ordering */
-#define HAVE_RO 1
-
-/* Enable ROCm */
-/* #undef HAVE_ROCM */
-
-/* Enable SCIF link Layer */
-/* #undef HAVE_SCIF */
-
-/* Enable Sniffer Flow Specification */
-#define HAVE_SNIFFER 1
-
-/* Have SRD support */
-/* #undef HAVE_SRD */
-
-/* Have SRD with RDMA read support */
-/* #undef HAVE_SRD_WITH_RDMA_READ */
-
-/* Have SRD with RDMA write support */
-/* #undef HAVE_SRD_WITH_RDMA_WRITE */
 
 /* Define to 1 if you have the <stdint.h> header file. */
 #define HAVE_STDINT_H 1
@@ -186,9 +168,6 @@
 /* Define to 1 if you have the <string.h> header file. */
 #define HAVE_STRING_H 1
 
-/* Define to 1 if you have the <synapse_api.h> header file. */
-/* #undef HAVE_SYNAPSE_API_H */
-
 /* Define to 1 if you have the <sys/stat.h> header file. */
 #define HAVE_SYS_STAT_H 1
 
@@ -198,41 +177,50 @@
 /* Define to 1 if you have the <unistd.h> header file. */
 #define HAVE_UNISTD_H 1
 
-/* Enable XRCD feature */
-#define HAVE_XRCD 1
+/* ============================================
+ * 未使用/禁用的功能
+ * ============================================ */
 
-/* OS is FreeBSD */
+/* Enable CUDA feature */
+/* #undef CUDA_PATH */
+/* #undef HAVE_CUDA */
+/* #undef HAVE_CUDA_DMABUF */
+
+/* HIP/ROCm support */
+/* #undef HAVE_HIP_HIP_RUNTIME_API_H */
+/* #undef HAVE_HIP_HIP_VERSION_H */
+/* #undef HAVE_ROCM */
+/* #undef __HIP_PLATFORM_AMD__ */
+
+/* Habana Labs */
+/* #undef HAVE_HL */
+/* #undef HAVE_HLTHUNK_H */
+/* #undef HAVE_MISC_HABANALABS_H */
+
+/* Neuron */
+/* #undef HAVE_NEURON */
+/* #undef HAVE_NEURON_DMABUF */
+/* #undef HAVE_NRT_NRT_H */
+/* #undef HAVE_SYNAPSE_API_H */
+
+/* Other */
+/* #undef HAVE_OOO_ATTR */
+/* #undef HAVE_SRD */
+/* #undef HAVE_SRD_WITH_RDMA_READ */
+/* #undef HAVE_SRD_WITH_RDMA_WRITE */
+/* #undef HAVE_SCIF */
 /* #undef IS_FREEBSD */
 
 /* Define to the sub-directory where libtool stores uninstalled libraries. */
 #define LT_OBJDIR ".libs/"
 
-/* Name of package */
+/* Package info */
 #define PACKAGE "perftest"
-
-/* Define to the address where bug reports for this package should be sent. */
 #define PACKAGE_BUGREPORT "linux-rdma@vger.kernel.org"
-
-/* Define to the full name of this package. */
 #define PACKAGE_NAME "perftest"
-
-/* Define to the full name and version of this package. */
 #define PACKAGE_STRING "perftest 6.22"
-
-/* Define to the one symbol short name of this package. */
 #define PACKAGE_TARNAME "perftest"
-
-/* Define to the home page for this package. */
 #define PACKAGE_URL ""
-
-/* Define to the version of this package. */
 #define PACKAGE_VERSION "6.22"
-
-/* Define to 1 if you have the ANSI C header files. */
 #define STDC_HEADERS 1
-
-/* Version number of package */
 #define VERSION "6.22"
-
-/* Enable ROCm */
-/* #undef __HIP_PLATFORM_AMD__ */

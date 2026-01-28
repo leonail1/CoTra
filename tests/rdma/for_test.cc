@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <iostream>
+#include <cstdint>
 
 #include "rdma/profiler.h"
 

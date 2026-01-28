@@ -1,5 +1,10 @@
 
 #include <omp.h>
+#include <signal.h>
+#include <execinfo.h>
+#include <cstdlib>
+#include <cstring>
+#include <unistd.h>
 
 #include <boost/program_options.hpp>
 
@@ -9,7 +14,58 @@
 #include "index/top_index.h"
 #include "index/vamana/vamana.h"
 
+// ============================================
+// 信号处理：打印崩溃堆栈
+// ============================================
+void print_stacktrace(int sig) {
+    void *array[50];
+    int size;
+    
+    // 获取堆栈帧
+    size = backtrace(array, 50);
+    
+    // 打印错误信息
+    const char* sig_name = "UNKNOWN";
+    switch(sig) {
+        case SIGSEGV: sig_name = "SIGSEGV (段错误)"; break;
+        case SIGABRT: sig_name = "SIGABRT (异常终止)"; break;
+        case SIGFPE:  sig_name = "SIGFPE (浮点异常)"; break;
+        case SIGILL:  sig_name = "SIGILL (非法指令)"; break;
+        case SIGBUS:  sig_name = "SIGBUS (总线错误)"; break;
+    }
+    
+    fprintf(stderr, "\n");
+    fprintf(stderr, "========================================\n");
+    fprintf(stderr, "程序崩溃! 信号: %s (%d)\n", sig_name, sig);
+    fprintf(stderr, "堆栈跟踪 (%d 帧):\n", size);
+    fprintf(stderr, "========================================\n");
+    
+    // 打印堆栈跟踪
+    backtrace_symbols_fd(array, size, STDERR_FILENO);
+    
+    fprintf(stderr, "========================================\n");
+    fprintf(stderr, "请使用 addr2line 获取详细信息:\n");
+    fprintf(stderr, "  addr2line -e build/tests/scala_index -Cf <地址>\n");
+    fprintf(stderr, "========================================\n");
+    
+    // 恢复默认处理并重新触发信号（生成core dump）
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+void register_signal_handlers() {
+    signal(SIGSEGV, print_stacktrace);  // 段错误
+    signal(SIGABRT, print_stacktrace);  // abort()
+    signal(SIGFPE,  print_stacktrace);  // 浮点异常
+    signal(SIGILL,  print_stacktrace);  // 非法指令
+    signal(SIGBUS,  print_stacktrace);  // 总线错误
+    fprintf(stderr, "[调试] 信号处理器已注册\n");
+}
+
 int main(int argc, char **argv) {
+  // 注册信号处理器，捕获崩溃并打印堆栈
+  register_signal_handlers();
+  
   SharedMem coromem;
   commandLine cmd(argc, argv, "Usage : \n");
   RdmaParameter rdma_param(cmd);

@@ -15,7 +15,7 @@ This project is an implementation of a high-performance distributed similarity v
 
 ## Requirements
 
-- **Operating System**: Linux (with RDMA-capable hardware support, Connect-X3 or above).  
+- **Operating System**: Linux (with RDMA-capable hardware support, Connect-X3 or above, or Alibaba Cloud eRDMA).  
 - **Compiler**: GCC 11+
 - **RDMA Libraries**: libibverbs, Infiniband
 
@@ -36,9 +36,66 @@ Please install dependencies of DiskANN: intel-oneapi
 2. **Build the Project**:
 ```bash
 mkdir build && cd build
-cmake ..
+cmake ..  # 默认使用 eRDMA 模式
 make -j
 ```
+
+For standard Mellanox RDMA:
+```bash
+cmake -DUSE_ERDMA=OFF ..
+make -j
+```
+
+---
+
+## Alibaba Cloud eRDMA Configuration
+
+If you are using **Alibaba Cloud ECS with eRDMA**, you need to enable **Compat mode** for OOB (Out-of-Band) connection establishment:
+
+### eRDMA Limitations
+
+**Important**: eRDMA has some limitations compared to standard Mellanox RDMA:
+- **Inline Data**: eRDMA does NOT support inline data. The code automatically sets `max_inline_data=0` when `USE_ERDMA` is enabled.
+- **max_sge**: eRDMA only supports `max_sge=1`.
+- **Memory Window (MW)**: eRDMA does NOT support Memory Window.
+- **Connection Mode**: Must use **Compat mode** for OOB connection (see below).
+
+### Enable eRDMA Compat Mode (Required for all nodes)
+
+```bash
+# 1. Add configuration (persistent)
+sudo sh -c "echo 'options erdma compat_mode=Y' >> /etc/modprobe.d/erdma.conf"
+
+# 2. Reload the driver
+sudo rmmod erdma
+sudo modprobe erdma compat_mode=Y
+
+# 3. Verify compat mode is enabled (should show 'Y')
+cat /sys/module/erdma/parameters/compat_mode
+```
+
+### Unlock Memory Limit (Required for eRDMA)
+
+```bash
+# Edit limits.conf
+sudo vi /etc/security/limits.conf
+
+# Add the following lines:
+* soft memlock unlimited
+* hard memlock unlimited
+```
+
+### Verify eRDMA Device
+
+```bash
+# Check device list
+ibv_devices
+
+# Check device details
+ibv_devinfo -d erdma_0
+```
+
+**Note**: Both local and remote nodes must have eRDMA Compat mode enabled.
 ## Download Datasets
 SIFT, DEEP, and Text2Image dataset (From Neurips21 BIGANN Contest): 
 https://big-ann-benchmarks.com/neurips21.html

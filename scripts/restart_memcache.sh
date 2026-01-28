@@ -77,7 +77,7 @@ clear_memcache() {
     echo -e "set clientNum 0 0 1\r\n0\r\nquit\r" | nc ${addr} ${port}
     echo "memcache clear and restart"
   fi
-  return 1
+  return 0
 }
 
 

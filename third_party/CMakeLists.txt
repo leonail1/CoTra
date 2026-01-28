@@ -35,8 +35,9 @@ include_directories(${PROJECT_SOURCE_DIR}/gperftools/src)
 endif()
 
 include_directories(/usr/local/include)
-include_directories(./3rdparty/faiss)
-link_libraries(/data/share/users/xyzhi/new-spack/spack-0.22.2/opt/spack/linux-debian9-skylake_avx512/gcc-8.2.0/faiss-1.7.4-7lwxh7hvrens6htzefdgvibwohkv7pdh/lib/libfaiss.a)
+# FAISS 未使用，注释掉
+# include_directories(./3rdparty/faiss)
+# link_libraries(/data/share/users/xyzhi/new-spack/spack-0.22.2/opt/spack/linux-debian9-skylake_avx512/gcc-8.2.0/faiss-1.7.4-7lwxh7hvrens6htzefdgvibwohkv7pdh/lib/libfaiss.a)
 
 #OpenMP
 # find_package(OpenMP)
@@ -59,7 +60,10 @@ if (NOT Boost_FOUND)
 endif()
 
 include_directories(${Boost_INCLUDE_DIR})
-set(POSSIBLE_OMP_PATHS "/data/share/users/xyzhi/new-spack/spack-0.22.2/opt/spack/linux-debian9-skylake_avx512/gcc-8.2.0/intel-oneapi-mkl-2024.0.0-a4e6uj4nsyq4llk43fbax6eobust7uug/compiler/latest/lib/libiomp5.so")
+set(POSSIBLE_OMP_PATHS 
+    "/usr/lib/x86_64-linux-gnu/libiomp5.so"
+    "/usr/lib/llvm-18/lib/libiomp5.so"
+)
     
 foreach(POSSIBLE_OMP_PATH ${POSSIBLE_OMP_PATHS})
     if (EXISTS ${POSSIBLE_OMP_PATH})
@@ -72,7 +76,9 @@ if(NOT OMP_PATH)
 endif()
 link_directories(${OMP_PATH})
 
-set(POSSIBLE_MKL_LIB_PATHS "/data/share/users/xyzhi/new-spack/spack-0.22.2/opt/spack/linux-debian9-skylake_avx512/gcc-8.2.0/intel-oneapi-mkl-2024.0.0-a4e6uj4nsyq4llk43fbax6eobust7uug/mkl/latest/lib/intel64/libmkl_core.so")
+set(POSSIBLE_MKL_LIB_PATHS 
+    "/usr/lib/x86_64-linux-gnu/libmkl_core.so"
+)
 
 foreach(POSSIBLE_MKL_LIB_PATH ${POSSIBLE_MKL_LIB_PATHS})
     if (EXISTS ${POSSIBLE_MKL_LIB_PATH})
@@ -80,7 +86,9 @@ foreach(POSSIBLE_MKL_LIB_PATH ${POSSIBLE_MKL_LIB_PATHS})
     endif()
 endforeach()
 
-set(POSSIBLE_MKL_INCLUDE_PATHS "/data/share/users/xyzhi/new-spack/spack-0.22.2/opt/spack/linux-debian9-skylake_avx512/gcc-8.2.0/intel-oneapi-mkl-2024.0.0-a4e6uj4nsyq4llk43fbax6eobust7uug/mkl/latest/include")
+set(POSSIBLE_MKL_INCLUDE_PATHS 
+    "/usr/include/mkl"
+)
 
 foreach(POSSIBLE_MKL_INCLUDE_PATH ${POSSIBLE_MKL_INCLUDE_PATHS})
     if (EXISTS ${POSSIBLE_MKL_INCLUDE_PATH})
@@ -144,10 +152,8 @@ if (DISKANN_RELEASE_UNUSED_TCMALLOC_MEMORY_AT_CHECKPOINTS)
 endif()
 
 if (NOT MSVC)
-    # set(DISKANN_ASYNC_LIB /home/xyzhi/spack-0.22.1/opt/spack/linux-debian9-skylake_avx512/gcc-8.2.0/libaio-0.3.113-urdghmhnrglt3zw2z74jzsn5t2xd6c2p/lib/libaio.so)
-    # include_directories(/home/xyzhi/spack-0.22.1/opt/spack/linux-debian9-skylake_avx512/gcc-8.2.0/libaio-0.3.113-urdghmhnrglt3zw2z74jzsn5t2xd6c2p/include)
-    set(DISKANN_ASYNC_LIB /data/share/users/xyzhi/new-spack/spack-0.22.2/opt/spack/linux-debian9-skylake_avx512/gcc-8.2.0/libaio-0.3.113-gk45wlx5vetueq7a43sa4di4uspbz3xb/lib/libaio.so)
-    include_directories(/data/share/users/xyzhi/new-spack/spack-0.22.2/opt/spack/linux-debian9-skylake_avx512/gcc-8.2.0/libaio-0.3.113-gk45wlx5vetueq7a43sa4di4uspbz3xb/include)
+    # 使用系统 libaio
+    set(DISKANN_ASYNC_LIB aio)
 endif()
 
 

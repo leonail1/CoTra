@@ -416,26 +416,33 @@ int RdmaCommunication::ctx_close_connection() {
 void RdmaCommunication::com_init(
     char *vec_part_ptr, size_t vec_part_len, RdmaParameter &input_param) {
   // on_each([&](uint64 tid, uint64 total) {
+  fprintf(stderr, "[DEBUG] com_init 开始, vec_part_ptr=%p, vec_part_len=%zu\n", 
+          vec_part_ptr, vec_part_len);
+  
   auto *main_ctx = rdma_ctx.getLocal();
   memset(main_ctx, 0, sizeof(RdmaContext));
   rdma_param = input_param;
 
+  fprintf(stderr, "[DEBUG] 查找 RDMA 设备: %s\n", rdma_param.ib_devname);
   struct ibv_device *ib_dev = ctx_find_dev(&rdma_param.ib_devname);
   if (!ib_dev) {
     fprintf(stderr, " Unable to find the Infiniband/RoCE device\n");
     exit(0);
   }
+  fprintf(stderr, "[DEBUG] RDMA 设备已找到\n");
 
   main_ctx->context = ibv_open_device(ib_dev);
   if (!main_ctx->context) {
     fprintf(stderr, " Couldn't get context for the device\n");
     exit(0);
   }
+  fprintf(stderr, "[DEBUG] ibv_open_device 成功\n");
 
   if (check_link(main_ctx->context, &rdma_param)) {
     fprintf(stderr, " Couldn't get context for the device\n");
     exit(0);
   }
+  fprintf(stderr, "[DEBUG] check_link 成功, 活跃线程数: %d\n", getActiveThreads());
 
   // rdma_param.memory_create = host_memory_create;
 
@@ -451,6 +458,7 @@ void RdmaCommunication::com_init(
   // }
 
   on_each([&](uint64 tid, uint64 total) {
+    fprintf(stderr, "[DEBUG] on_each 线程 %lu/%lu 开始\n", tid, total);
     auto *ctx = rdma_ctx.getLocal();
     // auto *&param = rdma_param;
 
@@ -458,19 +466,24 @@ void RdmaCommunication::com_init(
       fprintf(stderr, " Couldn't get context for the device\n");
       exit(0);
     }
+    fprintf(stderr, "[DEBUG] 线程 %lu: check_mtu 成功\n", tid);
 
     if (ctx->alloc_ctx(&rdma_param)) {
       fprintf(stderr, "Couldn't allocate context\n");
       exit(0);
     }
+    fprintf(stderr, "[DEBUG] 线程 %lu: alloc_ctx 成功\n", tid);
 
     ctx->pd = ibv_alloc_pd(ctx->context);
     if (!ctx->pd) {
       fprintf(stderr, "Couldn't allocate PD\n");
       exit(-1);
     }
+    fprintf(stderr, "[DEBUG] 线程 %lu: ibv_alloc_pd 成功, 准备创建 MR (ptr=%p, len=%zu)\n", 
+            tid, vec_part_ptr, vec_part_len);
     ctx->create_main_partition_mr(
         vec_part_ptr, vec_part_len, rdma_param.cache_line_size);
+    fprintf(stderr, "[DEBUG] 线程 %lu: create_main_partition_mr 完成\n", tid);
   });
 
   // for(int t = 0; t<getActiveThreads(); t++){
@@ -489,7 +502,10 @@ void RdmaCommunication::com_init(
 
   // create_main_partition_mr(main_ctx, vec_part_ptr, vec_part_len);
 
+  fprintf(stderr, "[DEBUG] 第一个 on_each 完成，开始第二个 on_each (ctx_init)\n");
+  
   on_each([&](uint64 tid, uint64 total) {
+    fprintf(stderr, "[DEBUG] ctx_init on_each 线程 %lu/%lu 开始\n", tid, total);
     auto *local_buf = read_buf.getLocal();
     auto *local_send_write = send_write_buf.getLocal();
     auto *local_recv_write = recv_write_buf.getLocal();
@@ -501,6 +517,8 @@ void RdmaCommunication::com_init(
     local_recv_write->init();
     // local_send->init();
     // local_recv->init();
+    
+    fprintf(stderr, "[DEBUG] 线程 %lu: 检查 for_read_mr[0]=%p\n", tid, ctx->for_read_mr[0]);
 
     // Register the buffers as our machine recv data buffer.
     if (ctx->ctx_init(
@@ -518,6 +536,7 @@ void RdmaCommunication::com_init(
       // free(rem_dest);
       exit(0);
     }
+    fprintf(stderr, "[DEBUG] 线程 %lu: ctx_init 成功\n", tid);
   });
 
   // auto &tp = getThreadPool();

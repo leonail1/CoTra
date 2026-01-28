@@ -3,7 +3,23 @@ project(rdma-anns)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules")
 
-set(CMAKE_BUILD_TYPE "Release")
+set(CMAKE_BUILD_TYPE "RelWithDebInfo")
+
+# ============================================
+# RDMA Configuration Options
+# ============================================
+option(USE_ERDMA "Use Alibaba Cloud eRDMA instead of Mellanox RDMA" ON)
+set(MACHINE_NUM 2 CACHE STRING "Number of machines in the cluster")
+
+if(USE_ERDMA)
+    message(STATUS "Building with eRDMA support (Mellanox features disabled)")
+    add_definitions(-DUSE_ERDMA)
+else()
+    message(STATUS "Building with standard Mellanox RDMA support")
+endif()
+
+add_definitions(-DMACHINE_NUM_CMAKE=${MACHINE_NUM})
+message(STATUS "Machine number: ${MACHINE_NUM}")
 
 message(STATUS "Build CoroMem library")
 
@@ -12,12 +28,12 @@ include(CheckCXXCompilerFlag)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(CMAKE_CXX_COMPILER /data/share/users/xyzhi/spack/opt/spack/linux-debian9-skylake_avx512/gcc-8.2.0/gcc-11.4.0-dwr4wdspczmg4ssoib2ftvjodmdydhk2/bin/g++)
+# 使用系统默认编译器
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-SET(CMAKE_CXX_FLAGS  "-Ofast -lrt -DHAVE_CXX0X -march=native -fpic -w -fopenmp -ftree-vectorize -ftree-vectorizer-verbose=0 -shared-libgcc -fcoroutines -fopenmp" )
+SET(CMAKE_CXX_FLAGS  "-O2 -g -lrt -DHAVE_CXX0X -march=native -fpic -w -fopenmp -ftree-vectorize -ftree-vectorizer-verbose=0 -shared-libgcc -fcoroutines -fopenmp -rdynamic" )
 
 set(CMAKE_THREAD_LIBS_INIT "-lpthread")
 
@@ -35,8 +51,8 @@ add_subdirectory(coromem)
 message(STATUS "Build RDMA library")
 
 # for rdma deps
-link_libraries(pthread /usr/lib/x86_64-linux-gnu/libibverbs.so.1 /usr/lib/x86_64-linux-gnu/librdmacm.so.1 ${MEMCACHED_LIB})
-include_directories("${PROJECT_SOURCE_DIR}" "/data/share/project/grasper/rdma-core/build/include")
+link_libraries(pthread ibverbs rdmacm ${MEMCACHED_LIB})
+include_directories("${PROJECT_SOURCE_DIR}")
 
 add_library(rdma_anns)
 file(GLOB sources 
@@ -53,7 +69,10 @@ target_include_directories(rdma_anns PUBLIC
 )
 
 
-set(POSSIBLE_OMP_PATHS "/data/share/users/xyzhi/new-spack/spack-0.22.2/opt/spack/linux-debian9-skylake_avx512/gcc-8.2.0/intel-oneapi-mkl-2024.0.0-a4e6uj4nsyq4llk43fbax6eobust7uug/compiler/latest/lib/libiomp5.so")
+set(POSSIBLE_OMP_PATHS 
+    "/usr/lib/x86_64-linux-gnu/libiomp5.so"
+    "/usr/lib/llvm-18/lib/libiomp5.so"
+)
     
 foreach(POSSIBLE_OMP_PATH ${POSSIBLE_OMP_PATHS})
     if (EXISTS ${POSSIBLE_OMP_PATH})
@@ -62,14 +81,18 @@ foreach(POSSIBLE_OMP_PATH ${POSSIBLE_OMP_PATHS})
 endforeach()
 link_directories(${OMP_PATH})
 
-set(POSSIBLE_MKL_LIB_PATHS "/data/share/users/xyzhi/new-spack/spack-0.22.2/opt/spack/linux-debian9-skylake_avx512/gcc-8.2.0/intel-oneapi-mkl-2024.0.0-a4e6uj4nsyq4llk43fbax6eobust7uug/mkl/latest/lib/intel64/libmkl_core.so")
+set(POSSIBLE_MKL_LIB_PATHS 
+    "/usr/lib/x86_64-linux-gnu/libmkl_core.so"
+)
 
 foreach(POSSIBLE_MKL_LIB_PATH ${POSSIBLE_MKL_LIB_PATHS})
     if (EXISTS ${POSSIBLE_MKL_LIB_PATH})
         get_filename_component(MKL_PATH ${POSSIBLE_MKL_LIB_PATH} DIRECTORY)
     endif()
 endforeach()
-set(POSSIBLE_MKL_INCLUDE_PATHS "/data/share/users/xyzhi/new-spack/spack-0.22.2/opt/spack/linux-debian9-skylake_avx512/gcc-8.2.0/intel-oneapi-mkl-2024.0.0-a4e6uj4nsyq4llk43fbax6eobust7uug/mkl/latest/include")
+set(POSSIBLE_MKL_INCLUDE_PATHS 
+    "/usr/include/mkl"
+)
 foreach(POSSIBLE_MKL_INCLUDE_PATH ${POSSIBLE_MKL_INCLUDE_PATHS})
     if (EXISTS ${POSSIBLE_MKL_INCLUDE_PATH})
         set(MKL_INCLUDE_PATH ${POSSIBLE_MKL_INCLUDE_PATH})
